@@ -4,18 +4,24 @@ import cors from "cors";
 import multer from "multer";
 import OpenAI from "openai";
 
+// Создаем интерфейс, чтобы TS понимал, что в Request есть файл от Multer
+interface MulterRequest extends Request {
+  file?: Express.Multer.File;
+}
+
 const app = express();
 app.use(cors());
+app.use(express.json()); // Добавлено для корректной работы с JSON
 
 /* =========================
-   OpenAI
+   OpenAI Configuration
 ========================= */
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
 /* =========================
-   Multer (memory)
+   Multer Storage (Memory)
 ========================= */
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -25,66 +31,68 @@ const upload = multer({
 });
 
 /* =========================
-   Health check
+   Health Check
 ========================= */
 app.get("/health", (_req: Request, res: Response) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", service: "VivaPortugal AI" });
 });
 
 /* =========================
-   Analyze image
+   Analyze Image Endpoint
 ========================= */
+// Используем MulterRequest вместо обычного Request
 app.post(
   "/api/analyze",
   upload.single("image"),
-  async (req: Request, res: Response) => {
+  async (req: MulterRequest, res: Response): Promise<any> => {
     try {
+      // 1. Проверка наличия файла
       if (!req.file) {
-        return res.status(400).json({ error: "Image is required" });
+        return res.status(400).json({ error: "Image file is required" });
       }
 
       const imageBase64 = req.file.buffer.toString("base64");
 
       const prompt = `
-You are VivaPortugal AI.
-Analyze this product image and return ONLY valid JSON.
+        You are VivaPortugal AI.
+        Analyze this product image and return ONLY valid JSON.
 
-Schema:
-{
-  "seo": {
-    "title": "string",
-    "description": "string"
-  },
-  "pinterest": {
-    "keywords": ["string"],
-    "board": {
-      "title": "string",
-      "description": "string"
-    }
-  },
-  "crop": {
-    "x": number,
-    "y": number,
-    "width": number,
-    "height": number
-  }
-}
+        Schema:
+        {
+          "seo": {
+            "title": "string",
+            "description": "string"
+          },
+          "pinterest": {
+            "keywords": ["string"],
+            "board": {
+              "title": "string",
+              "description": "string"
+            }
+          },
+          "crop": {
+            "x": number,
+            "y": number,
+            "width": number,
+            "height": number
+          }
+        }
 
-Rules:
-- Language: English
-- Market: US
-- Audience: tourists, diaspora, gift buyers
-- Include keywords naturally:
-  portugal, azulejo, porto, lisbon, portuguese gifts
-- Crop is portrait 1000x1500 (relative values 0..1)
-`;
+        Rules:
+        - Language: English
+        - Market: US
+        - Audience: tourists, diaspora, gift buyers
+        - Include keywords naturally: portugal, azulejo, porto, lisbon, portuguese gifts
+        - Crop is portrait 1000x1500 (relative values 0..1)
+      `;
 
+      // 2. Запрос к OpenAI
       const response = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
-            content: "Return ONLY valid JSON. No markdown. No text."
+            content: "Return ONLY valid JSON. No markdown. No text explanations."
           },
           {
             role: "user",
@@ -104,13 +112,15 @@ Rules:
 
       const content = response.choices[0].message.content;
       if (!content) {
-        throw new Error("OpenAI returned empty response");
+        throw new Error("OpenAI returned an empty response");
       }
 
-      res.json(JSON.parse(content));
+      // 3. Отправка результата
+      return res.json(JSON.parse(content));
+
     } catch (err: any) {
-      console.error("❌ OpenAI error:", err);
-      res.status(500).json({
+      console.error("❌ OpenAI Error:", err.message);
+      return res.status(500).json({
         error: err.message || "Internal server error"
       });
     }
@@ -118,7 +128,7 @@ Rules:
 );
 
 /* =========================
-   Start server
+   Start Server
 ========================= */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
