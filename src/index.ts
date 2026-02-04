@@ -47,7 +47,6 @@ app.post(
 
       const prompt = `
 You are VivaPortugal AI.
-
 Analyze this product image and return ONLY valid JSON.
 
 Schema:
@@ -81,7 +80,7 @@ Rules:
 `;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-4.1-mini",
+        model: "gpt-4o-mini",
         messages: [
           {
             role: "system",
@@ -104,7 +103,6 @@ Rules:
       });
 
       const content = response.choices[0].message.content;
-
       if (!content) {
         throw new Error("OpenAI returned empty response");
       }
@@ -122,8 +120,7 @@ Rules:
 /* =========================
    Start server
 ========================= */
-const PORT = 8787;
-
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 VivaPortugal AI Backend running on http://localhost:${PORT}`);
+  console.log(`🚀 VivaPortugal AI Backend running on port ${PORT}`);
 });
