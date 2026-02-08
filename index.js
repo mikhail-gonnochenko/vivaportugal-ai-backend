@@ -10,35 +10,51 @@ dotenv.config();
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
-  })
-);
+app.use(cors({ origin: "*" }));
 
 app.get("/", (req, res) => {
   res.send("VivaPortugal backend OK");
 });
 
-// ================= ENV =================
+// ================= ENV CHECK =================
 const API_KEY = process.env.OPENAI_API_KEY;
 
 if (!API_KEY) {
   console.error("❌ OPENAI_API_KEY is missing");
 }
 
-// ================= OPENAI =================
+// ================= OPENAI CLIENT =================
 const client = new OpenAI({
   apiKey: API_KEY,
 });
 
-// ================= PROMPT =================
+// ================= SYSTEM PROMPT =================
 const SYSTEM_PROMPT = `
-You are VivaPortugal AI — a strict Pinterest SEO assistant.
+You are VivaPortugal AI — a strict Pinterest SEO assistant
+for a Portuguese cultural gift brand.
 
-Return ONLY valid JSON. No markdown. No explanations.
+Return ONLY ONE valid JSON object.
+NO explanations. NO markdown. NO extra fields.
+
+The JSON MUST follow this structure exactly:
+
+{
+  "pinterest_title": string,
+  "pinterest_description": string,
+  "board": string,
+  "crop": {
+    "x": number,
+    "y": number,
+    "width": number,
+    "height": number
+  }
+}
+
+Rules:
+- crop values MUST be between 0 and 1
+- ALWAYS include crop
+- crop must be vertical (Pinterest-friendly)
+- NO missing fields
 `;
 
 // ================= HEALTH =================
@@ -49,8 +65,6 @@ app.get("/api/health", (req, res) => {
 // ================= ANALYZE =================
 app.post("/api/analyze", upload.single("image"), async (req, res) => {
   try {
-    console.log("➡️ /api/analyze hit");
-
     if (!API_KEY) {
       return res.status(500).json({ error: "OPENAI_API_KEY missing" });
     }
@@ -63,7 +77,6 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
 
     const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
-      temperature: 0.2,
       messages: [
         {
           role: "system",
@@ -82,9 +95,10 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
           ],
         },
       ],
+      temperature: 0.2,
     });
 
-    const text = response.choices[0]?.message?.content;
+    const text = response.choices?.[0]?.message?.content;
 
     if (!text) {
       console.error("❌ Empty AI response", response);
@@ -97,15 +111,28 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
     try {
       parsed = JSON.parse(clean);
     } catch (e) {
-      console.error("❌ JSON parse error. RAW:", clean);
+      console.error("❌ JSON parse error:", clean);
       return res.status(500).json({ error: "Invalid JSON from AI" });
     }
 
-    res.json(parsed);
+    // ===== HARD VALIDATION =====
+    if (
+      !parsed.crop ||
+      typeof parsed.crop.x !== "number" ||
+      typeof parsed.crop.y !== "number" ||
+      typeof parsed.crop.width !== "number" ||
+      typeof parsed.crop.height !== "number"
+    ) {
+      return res.status(500).json({
+        error: "AI response missing crop",
+        raw: parsed,
+      });
+    }
 
+    return res.json(parsed);
   } catch (err) {
     console.error("❌ AI ERROR:", err);
-    res.status(500).json({ error: "AI analysis failed" });
+    return res.status(500).json({ error: "AI analysis failed" });
   }
 });
 
