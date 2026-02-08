@@ -150,22 +150,30 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
 
     console.log("📤 Sending image to OpenAI (Responses API)");
 
-    const response = await client.responses.create({
-      model: "gpt-4o-mini",
-      input: [
-        { role: "system", content: SYSTEM_PROMPT },
+   const response = await client.chat.completions.create({
+  model: "gpt-4o-mini",
+  messages: [
+    {
+      role: "system",
+      content: SYSTEM_PROMPT,
+    },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "Analyze the image." },
         {
-          role: "user",
-          content: [
-            { type: "input_text", text: "Analyze the image." },
-            {
-              type: "input_image",
-              image_url: `data:image/jpeg;base64,${base64Image}`,
-            },
-          ],
+          type: "image_url",
+          image_url: {
+            url: `data:image/jpeg;base64,${base64Image}`,
+          },
         },
       ],
-    });
+    },
+  ],
+  temperature: 0.2,
+});
+
+const text = response.choices[0].message.content;
 
     // В Responses API есть удобное поле output_text (в доках так и показано)
     let text = (response.output_text || "").trim();
@@ -201,3 +209,4 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, () => {
   console.log(`✅ Backend running on port ${PORT}`);
 });
+
