@@ -191,7 +191,8 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
 
 // ================= START SERVER =================
 
-const PORT = 8787;
+const PORT = process.env.PORT || 8787;
+
 app.listen(PORT, () => {
-  console.log(`Backend running on http://localhost:${PORT}`);
+  console.log("Backend running on port", PORT);
 });
