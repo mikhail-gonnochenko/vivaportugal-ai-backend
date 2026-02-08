@@ -11,7 +11,13 @@ dotenv.config();
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(cors({ origin: "*" }));
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+}));
+
+app.options("*", cors());
 
 // ================= OPENAI CLIENT =================
 
@@ -196,3 +202,4 @@ const PORT = process.env.PORT || 8787;
 app.listen(PORT, () => {
   console.log("Backend running on port", PORT);
 });
+
