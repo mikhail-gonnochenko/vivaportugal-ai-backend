@@ -4,22 +4,43 @@ import multer from "multer";
 import OpenAI from "openai";
 import dotenv from "dotenv";
 
+/**
+ * Загружаем переменные окружения (.env локально, Render — автоматически)
+ */
 dotenv.config();
 
 // ================= APP SETUP =================
 
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}));
+/**
+ * Multer — принимаем файл в памяти (multipart/form-data)
+ */
+const upload = multer({
+  storage: multer.memoryStorage(),
+});
 
+/**
+ * CORS — разрешаем запросы с frontend (Render Static Site)
+ */
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+/**
+ * Обработка preflight-запросов
+ */
 app.options("*", cors());
 
 // ================= OPENAI CLIENT =================
+
+if (!process.env.OPENAI_API_KEY) {
+  console.error("❌ OPENAI_API_KEY is NOT defined");
+}
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -84,13 +105,6 @@ Return ONLY ONE board name exactly as written.
 - You MUST return RELATIVE values between 0 and 1
 - NEVER return pixel values
 - If any crop value is greater than 1, the response is INVALID
-- Correct example:
-  {
-    "x": 0.1,
-    "y": 0.05,
-    "width": 0.8,
-    "height": 0.9
-  }
 - Crop must be vertical and Pinterest-friendly
 - Focus on the main subject
 
@@ -100,7 +114,9 @@ Return ONLY ONE board name exactly as written.
 
 // ================= UTILS =================
 
-// Backend safety: normalize crop no matter what AI returns
+/**
+ * Нормализация crop, даже если AI прислал мусор
+ */
 function normalizeCrop(crop) {
   if (!crop) {
     return { x: 0.1, y: 0.05, width: 0.8, height: 0.9 };
@@ -108,7 +124,6 @@ function normalizeCrop(crop) {
 
   const { x, y, width, height } = crop;
 
-  // Already valid (0–1)
   if (
     x >= 0 && x <= 1 &&
     y >= 0 && y <= 1 &&
@@ -118,7 +133,6 @@ function normalizeCrop(crop) {
     return crop;
   }
 
-  // Assume pixel-like or garbage values → normalize
   const maxX = Math.max(x + width, 1);
   const maxY = Math.max(y + height, 1);
 
@@ -139,12 +153,17 @@ app.get("/api/health", (req, res) => {
 // ================= ANALYZE ENDPOINT =================
 
 app.post("/api/analyze", upload.single("image"), async (req, res) => {
+  console.log("➡️ /api/analyze hit");
+  console.log("Has file:", !!req.file);
+
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No image uploaded" });
     }
 
     const base64Image = req.file.buffer.toString("base64");
+
+    console.log("📤 Sending image to OpenAI");
 
     const response = await client.responses.create({
       model: "gpt-4o-mini",
@@ -167,11 +186,12 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
     });
 
     let text = response.output_text?.trim();
+    console.log("📥 OpenAI raw output:", text);
+
     if (!text) {
       throw new Error("Empty AI response");
     }
 
-    // Remove ```json fences if AI disobeys
     if (text.startsWith("```")) {
       text = text.replace(/```json|```/g, "").trim();
     }
@@ -180,17 +200,16 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
     try {
       parsed = JSON.parse(text);
     } catch (e) {
-      console.error("JSON PARSE ERROR:", text);
+      console.error("❌ JSON PARSE ERROR:", text);
       return res.status(500).json({ error: "Invalid JSON from AI" });
     }
 
-    // 🔒 FINAL SAFETY LAYER
     parsed.crop = normalizeCrop(parsed.crop);
 
     res.json(parsed);
-
   } catch (err) {
-    console.error("AI ERROR:", err);
+    console.error("🔥 AI ERROR:", err);
+    console.error("🔥 STACK:", err.stack);
     res.status(500).json({ error: "AI analysis failed" });
   }
 });
@@ -200,6 +219,5 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
 const PORT = process.env.PORT || 8787;
 
 app.listen(PORT, () => {
-  console.log("Backend running on port", PORT);
+  console.log(`✅ Backend running on port ${PORT}`);
 });
-
