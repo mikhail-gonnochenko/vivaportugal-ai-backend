@@ -10,7 +10,13 @@ dotenv.config();
 const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(cors({ origin: "*" }));
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+  })
+);
 
 app.get("/", (req, res) => {
   res.send("VivaPortugal backend OK");
@@ -20,17 +26,19 @@ app.get("/", (req, res) => {
 const API_KEY = process.env.OPENAI_API_KEY;
 
 if (!API_KEY) {
-  console.error("❌ OPENAI_API_KEY missing");
+  console.error("❌ OPENAI_API_KEY is missing");
 }
 
 // ================= OPENAI =================
-const client = new OpenAI({ apiKey: API_KEY });
+const client = new OpenAI({
+  apiKey: API_KEY,
+});
 
 // ================= PROMPT =================
 const SYSTEM_PROMPT = `
 You are VivaPortugal AI — a strict Pinterest SEO assistant.
 
-Return ONLY valid JSON.
+Return ONLY valid JSON. No markdown. No explanations.
 `;
 
 // ================= HEALTH =================
@@ -41,6 +49,12 @@ app.get("/api/health", (req, res) => {
 // ================= ANALYZE =================
 app.post("/api/analyze", upload.single("image"), async (req, res) => {
   try {
+    console.log("➡️ /api/analyze hit");
+
+    if (!API_KEY) {
+      return res.status(500).json({ error: "OPENAI_API_KEY missing" });
+    }
+
     if (!req.file) {
       return res.status(400).json({ error: "No image uploaded" });
     }
@@ -49,8 +63,12 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
 
     const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
+      temperature: 0.2,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        {
+          role: "system",
+          content: SYSTEM_PROMPT,
+        },
         {
           role: "user",
           content: [
@@ -64,17 +82,24 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
           ],
         },
       ],
-      temperature: 0.2,
     });
 
-    const text = response.choices[0].message.content?.trim();
+    const text = response.choices[0]?.message?.content;
 
     if (!text) {
+      console.error("❌ Empty AI response", response);
       return res.status(500).json({ error: "Empty AI response" });
     }
 
     const clean = text.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(clean);
+    } catch (e) {
+      console.error("❌ JSON parse error. RAW:", clean);
+      return res.status(500).json({ error: "Invalid JSON from AI" });
+    }
 
     res.json(parsed);
 
