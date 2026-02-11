@@ -4,51 +4,128 @@ import multer from "multer";
 import OpenAI from "openai";
 import dotenv from "dotenv";
 import { v2 as cloudinary } from "cloudinary";
-import sizeOf from "image-size";
+import { imageSize } from "image-size";
+import rateLimit from "express-rate-limit";
 
 dotenv.config();
 
 // ================= CLOUDINARY CONFIG =================
-
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ================= APP SETUP =================
-
+// ================= APP INIT =================
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
 
-app.use(cors({ origin: "*" }));
+// ================= SECURITY =================
+
+// Rate limit (budget protection)
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { error: "Too many requests. Budget protection active." },
+});
+app.use("/api/", apiLimiter);
+
+// CORS whitelist
+const allowedOrigins = [
+  "http://localhost:5173",
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`⚠️ CORS blocked for origin: ${origin}`);
+      callback(new Error("CORS policy violation"));
+    }
+  }
+}));
+
 app.use(express.json());
 
-// ================= OPENAI CLIENT =================
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+// ================= MULTER =================
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
 });
 
-// ================= STRATEGIC SYSTEM PROMPT (SEO ULTIMATE) =================
+// ================= OPENAI =================
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
-const SYSTEM_PROMPT = `
-You are a Pinterest SEO expert for VivaPortugal. Your mission is to generate content that ranks and converts.
+// ================= CONSTANTS =================
+const FALLBACK_CROP = { x: 0.1, y: 0.1, width: 0.8, height: 0.8 };
 
-Return ONLY a valid JSON object.
+const ALLOWED_BOARDS = [
+  "Portugal Gift Ideas",
+  "Portuguese Home Decor",
+  "Lisbon Travel Gifts",
+  "Azulejo Art"
+];
 
-CRITICAL RULES FOR CONTENT:
-1. **Prioritize search intent over creativity.**
-2. **Titles:** Must START with the primary keyword.
-3. **Keyword Placement:** The primary keyword MUST appear within the first 40 characters of the title.
-4. **Forbidden Phrases:** Strictly avoid vague words like "explore", "discover", "celebrate".
-5. **Tone:** Use commercial and buyer-intent phrasing (e.g., "Wall art", "Gift ideas", "Souvenir").
-6. **Description:** 500-800 characters, natural SEO-rich paragraph. NO hashtags.
-7. **Keywords:** 5-8 high-intent phrases (no single words).
-8. **Board:** Choose from: Azulejo Dreams, Porto Collection, Lisbon Art, Portugal Gift Ideas, Portuguese Icons, Galo de Barcelos, Ocean Life, Minimalist Portugal, Douro Valley, Wine Collection.
-9. **Crop:** Relative values (0-1).
+// ================= VALIDATION =================
+const validateAIResponse = (data) => {
+  if (typeof data.pinterest_title !== "string" || data.pinterest_title.length < 15)
+    throw new Error("Invalid title");
 
-JSON Schema:
+  if (
+    typeof data.pinterest_description !== "string" ||
+    data.pinterest_description.length < 250 ||
+    data.pinterest_description.length > 850
+  )
+    throw new Error("Invalid description length");
+
+  if (!Array.isArray(data.keywords) || data.keywords.length < 3 || data.keywords.length > 12)
+    throw new Error("Invalid keywords");
+
+  if (!ALLOWED_BOARDS.includes(data.board))
+    data.board = ALLOWED_BOARDS[0];
+
+  if (
+    !data.crop ||
+    typeof data.crop.x !== "number" ||
+    typeof data.crop.y !== "number" ||
+    typeof data.crop.width !== "number" ||
+    typeof data.crop.height !== "number"
+  ) {
+    data.crop = FALLBACK_CROP;
+  }
+
+  return data;
+};
+
+// ================= HEALTH =================
+app.get("/api/health", (req, res) => {
+  res.json({ ok: true, version: "v3.6-final-stable" });
+});
+
+// ================= ANALYZE =================
+app.post("/api/analyze", upload.single("image"), async (req, res) => {
+  try {
+    if (!req.file)
+      return res.status(400).json({ error: "No image uploaded" });
+
+    if (!req.file.mimetype.startsWith("image/"))
+      return res.status(400).json({ error: "Images only" });
+
+    const base64Image = req.file.buffer.toString("base64");
+
+    const response = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content: `
+You are a Pinterest SEO Expert for VivaPortugal.
+
+Return ONLY valid JSON:
 {
   "pinterest_title": string,
   "pinterest_description": string,
@@ -56,125 +133,120 @@ JSON Schema:
   "board": string,
   "crop": { "x": number, "y": number, "width": number, "height": number }
 }
-`;
 
-// ================= UTILS =================
-
-function normalizeCrop(crop) {
-  if (!crop) return { x: 0.1, y: 0.05, width: 0.8, height: 0.9 };
-  const { x, y, width, height } = crop;
-
-  if (
-    x >= 0 && x <= 1 &&
-    y >= 0 && y <= 1 &&
-    width > 0 && width <= 1 &&
-    height > 0 && height <= 1
-  ) {
-    return crop;
-  }
-  return { x: 0.1, y: 0.05, width: 0.8, height: 0.9 };
-}
-
-// ================= ENDPOINTS =================
-
-app.get("/api/health", (req, res) => {
-  res.json({ ok: true, status: "Backend is running" });
-});
-
-// Эндпоинт №1: Анализ (OpenAI)
-app.post("/api/analyze", upload.single("image"), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
-
-    const base64Image = req.file.buffer.toString("base64");
-
-    const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+Rules:
+- Title must start with primary keyword (within first 30 chars).
+- Description 500-800 characters.
+- 3-5 keyword phrases naturally included.
+- Commercial buyer intent only.
+          `
+        },
         {
           role: "user",
           content: [
-            { type: "text", text: "Analyze this image for high-intent Pinterest SEO." },
-            {
-              type: "image_url",
-              image_url: { url: `data:image/jpeg;base64,${base64Image}` },
-            },
-          ],
-        },
-      ],
+            { type: "text", text: "Analyze for Pinterest SEO." },
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } }
+          ]
+        }
+      ]
     });
 
-    let text = response.choices[0].message.content.trim();
-    if (text.startsWith("```")) {
-      text = text.replace(/```json|```/g, "").trim();
-    }
+    const parsed = JSON.parse(response.choices[0].message.content);
+    const validated = validateAIResponse(parsed);
 
-    const parsed = JSON.parse(text);
-    parsed.crop = normalizeCrop(parsed.crop);
+    res.json(validated);
 
-    res.json(parsed);
   } catch (err) {
-    console.error("❌ AI ERROR:", err);
+    console.error("❌ AI Error:", err.message);
     res.status(500).json({ error: "AI analysis failed" });
   }
 });
 
-// Эндпоинт №2: Загрузка и Кроп (Cloudinary)
+// ================= UPLOAD =================
 app.post("/api/upload", upload.single("image"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+    if (!req.file)
+      return res.status(400).json({ error: "No image uploaded" });
 
-    const cropRaw = req.body.crop;
-    if (!cropRaw) return res.status(400).json({ error: "Missing crop data" });
+    if (!req.file.mimetype.startsWith("image/"))
+      return res.status(400).json({ error: "Invalid file type" });
 
-    let crop = JSON.parse(cropRaw);
+    let dims;
+    try {
+      dims = imageSize(req.file.buffer);
+    } catch {
+      return res.status(400).json({ error: "Invalid image data" });
+    }
 
-    const dims = sizeOf(req.file.buffer);
-    const imgW = dims.width;
-    const imgH = dims.height;
+    if (!dims?.width || !dims?.height)
+      return res.status(400).json({ error: "Cannot read image dimensions" });
 
-    const x = Math.max(0, Math.round(crop.x * imgW));
-    const y = Math.max(0, Math.round(crop.y * imgH));
-    const w = Math.max(1, Math.round(crop.width * imgW));
-    const h = Math.max(1, Math.round(crop.height * imgH));
+    let crop;
+    try {
+      const raw = JSON.parse(req.body.crop);
+      if (
+        typeof raw.x !== "number" ||
+        typeof raw.y !== "number" ||
+        typeof raw.width !== "number" ||
+        typeof raw.height !== "number" ||
+        raw.width <= 0 ||
+        raw.height <= 0
+      ) {
+        throw new Error();
+      }
+      crop = raw;
+    } catch {
+      crop = FALLBACK_CROP;
+    }
 
-    const base64 = req.file.buffer.toString("base64");
-    const dataUri = `data:${req.file.mimetype};base64,${base64}`;
+    let x = Math.max(0, Math.min(dims.width - 1, Math.round(crop.x * dims.width)));
+    let y = Math.max(0, Math.min(dims.height - 1, Math.round(crop.y * dims.height)));
 
-    const uploaded = await cloudinary.uploader.upload(dataUri, {
-      folder: "vivaportugal/original",
-      resource_type: "image",
-    });
+    let w = Math.max(1, Math.min(dims.width - x, Math.round(crop.width * dims.width)));
+    let h = Math.max(1, Math.min(dims.height - y, Math.round(crop.height * dims.height)));
 
-    const pinterestUrl = cloudinary.url(uploaded.public_id, {
-      secure: true,
-      transformation: [
-        { crop: "crop", x, y, width: w, height: h, gravity: "north_west" },
-        { crop: "fill", width: 1000, height: 1500 },
-      ],
-    });
-
-    return res.json({
-      ok: true,
-      image: {
-        public_id: uploaded.public_id,
-        original_url: uploaded.secure_url,
-        pinterest_url: pinterestUrl,
-        original_width: imgW,
-        original_height: imgH,
-        crop_px: { x, y, width: w, height: h },
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder: "vivaportugal/v3_final",
+        transformation: [
+          { crop: "crop", x, y, width: w, height: h, gravity: "north_west" },
+          { crop: "fill", width: 1000, height: 1500 },
+        ],
       },
-    });
+      (err, result) => {
+        if (err) {
+          console.error("❌ Cloudinary Error:", err);
+          return res.status(500).json({ error: "Upload failed" });
+        }
+
+        res.json({
+          ok: true,
+          image: {
+            pinterest_url: result.secure_url,
+            public_id: result.public_id
+          }
+        });
+      }
+    );
+
+    stream.end(req.file.buffer);
+
   } catch (err) {
-    console.error("❌ /api/upload error:", err);
-    return res.status(500).json({ error: "Upload failed" });
+    console.error("❌ Server Error:", err.message);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// ================= START SERVER =================
+// ================= MULTER ERROR HANDLER =================
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError && err.code === "LIMIT_FILE_SIZE") {
+    return res.status(400).json({ error: "File too large. Max 5MB." });
+  }
+  next(err);
+});
 
+// ================= START =================
 const PORT = process.env.PORT || 8787;
 app.listen(PORT, () => {
-  console.log(`✅ Backend running on port ${PORT}`);
+  console.log(`🚀 VivaPortugal AI Engine running on port ${PORT}`);
 });
