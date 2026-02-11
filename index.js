@@ -4,7 +4,7 @@ import multer from "multer";
 import OpenAI from "openai";
 import dotenv from "dotenv";
 import { v2 as cloudinary } from "cloudinary";
-import sizeOf from "image-size"; // Используем для получения размеров изображения
+import sizeOf from "image-size";
 
 dotenv.config();
 
@@ -22,7 +22,7 @@ const app = express();
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors({ origin: "*" }));
-app.use(express.json()); // Чтобы сервер понимал JSON в теле запроса
+app.use(express.json());
 
 // ================= OPENAI CLIENT =================
 
@@ -30,17 +30,19 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ================= SYSTEM PROMPT =================
+// ================= STRATEGIC SYSTEM PROMPT =================
 
 const SYSTEM_PROMPT = `
-You are VivaPortugal AI — a strict Pinterest SEO assistant for a Portuguese cultural gift brand.
-Analyze the provided image and return ONE valid JSON object only.
-No explanations. No comments. No markdown. No extra text.
+You are a Pinterest SEO expert for a brand called VivaPortugal.
+Your job is to analyze the uploaded image and generate high-converting Pinterest content targeting international audiences interested in Portugal, Lisbon, Porto, azulejo decor, and Portuguese gifts.
+
+Return ONLY valid JSON object. No extra text.
 
 The JSON must strictly follow this schema:
 {
   "pinterest_title": string,
   "pinterest_description": string,
+  "keywords": string[],
   "board": string,
   "crop": {
     "x": number,
@@ -51,10 +53,11 @@ The JSON must strictly follow this schema:
 }
 
 Rules:
-1. Title: Max 100 chars, SEO keywords (portugal, azulejo, porto, lisbon).
-2. Description: 2-3 sentences, SEO friendly, NO hashtags.
-3. Board: Choose exactly one from the approved list.
-4. Crop: Return RELATIVE values (0-1). Vertical focus.
+1. Title: 60-90 characters, SEO optimized, must include Portugal-related keywords.
+2. Description: 500-800 characters, natural SEO-rich paragraph. Focus on storytelling and intent. NO hashtags.
+3. Keywords: 5-8 high-intent keyword phrases (e.g., "Lisbon home decor", "Portuguese azulejo gifts").
+4. Board: Choose exactly one from: Azulejo Dreams, Porto Collection, Lisbon Art, Portugal Gift Ideas, Portuguese Icons, Galo de Barcelos, Ocean Life, Minimalist Portugal, Douro Valley, Wine Collection.
+5. Crop: Return RELATIVE values (0-1). Focus on the vertical object.
 `;
 
 // ================= UTILS =================
@@ -71,13 +74,11 @@ function normalizeCrop(crop) {
   ) {
     return crop;
   }
-
   return { x: 0.1, y: 0.05, width: 0.8, height: 0.9 };
 }
 
 // ================= ENDPOINTS =================
 
-// Проверка работоспособности
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, status: "Backend is running" });
 });
@@ -96,7 +97,7 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
         {
           role: "user",
           content: [
-            { type: "text", text: "Analyze the image." },
+            { type: "text", text: "Analyze this image for Pinterest SEO." },
             {
               type: "image_url",
               image_url: { url: `data:image/jpeg;base64,${base64Image}` },
@@ -129,26 +130,17 @@ app.post("/api/upload", upload.single("image"), async (req, res) => {
     const cropRaw = req.body.crop;
     if (!cropRaw) return res.status(400).json({ error: "Missing crop data" });
 
-    let crop;
-    try {
-      crop = JSON.parse(cropRaw);
-    } catch {
-      return res.status(400).json({ error: "Invalid crop JSON" });
-    }
+    let crop = JSON.parse(cropRaw);
 
-    // 1) Определяем размеры оригинала
     const dims = sizeOf(req.file.buffer);
     const imgW = dims.width;
     const imgH = dims.height;
 
-    // 2) Конвертация: Относительные координаты (0-1) -> Пиксели
-    // Формулы: $$x_{px} = x \cdot W_{img}$$, $$y_{px} = y \cdot H_{img}$$
     const x = Math.max(0, Math.round(crop.x * imgW));
     const y = Math.max(0, Math.round(crop.y * imgH));
     const w = Math.max(1, Math.round(crop.width * imgW));
     const h = Math.max(1, Math.round(crop.height * imgH));
 
-    // 3) Загрузка в Cloudinary через Data URI
     const base64 = req.file.buffer.toString("base64");
     const dataUri = `data:${req.file.mimetype};base64,${base64}`;
 
@@ -157,7 +149,6 @@ app.post("/api/upload", upload.single("image"), async (req, res) => {
       resource_type: "image",
     });
 
-    // 4) Генерация URL с трансформациями (Сначала Crop, потом Resize)
     const pinterestUrl = cloudinary.url(uploaded.public_id, {
       secure: true,
       transformation: [
@@ -179,7 +170,7 @@ app.post("/api/upload", upload.single("image"), async (req, res) => {
     });
   } catch (err) {
     console.error("❌ /api/upload error:", err);
-    return res.status(500).json({ error: "Upload and transformation failed" });
+    return res.status(500).json({ error: "Upload failed" });
   }
 });
 
