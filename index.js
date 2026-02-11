@@ -247,6 +247,32 @@ app.use((err, req, res, next) => {
 
 // ================= START =================
 const PORT = process.env.PORT || 8787;
+// ================= PINTEREST CALLBACK =================
+
+app.get("/api/pinterest/callback", async (req, res) => {
+  try {
+    const { code, error } = req.query;
+
+    if (error) {
+      console.error("Pinterest OAuth error:", error);
+      return res.status(400).send("Pinterest authorization failed.");
+    }
+
+    if (!code) {
+      return res.status(400).send("Missing authorization code.");
+    }
+
+    console.log("Pinterest authorization code received:", code);
+
+    // Пока просто подтверждаем получение кода
+    res.send("Pinterest authorization successful. Code received.");
+    
+  } catch (err) {
+    console.error("Callback error:", err);
+    res.status(500).send("Internal server error.");
+  }
+});
 app.listen(PORT, () => {
   console.log(`🚀 VivaPortugal AI Engine running on port ${PORT}`);
 });
+
