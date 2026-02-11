@@ -30,34 +30,32 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ================= STRATEGIC SYSTEM PROMPT =================
+// ================= STRATEGIC SYSTEM PROMPT (SEO ULTIMATE) =================
 
 const SYSTEM_PROMPT = `
-You are a Pinterest SEO expert for a brand called VivaPortugal.
-Your job is to analyze the uploaded image and generate high-converting Pinterest content targeting international audiences interested in Portugal, Lisbon, Porto, azulejo decor, and Portuguese gifts.
+You are a Pinterest SEO expert for VivaPortugal. Your mission is to generate content that ranks and converts.
 
-Return ONLY valid JSON object. No extra text.
+Return ONLY a valid JSON object.
 
-The JSON must strictly follow this schema:
+CRITICAL RULES FOR CONTENT:
+1. **Prioritize search intent over creativity.**
+2. **Titles:** Must START with the primary keyword.
+3. **Keyword Placement:** The primary keyword MUST appear within the first 40 characters of the title.
+4. **Forbidden Phrases:** Strictly avoid vague words like "explore", "discover", "celebrate".
+5. **Tone:** Use commercial and buyer-intent phrasing (e.g., "Wall art", "Gift ideas", "Souvenir").
+6. **Description:** 500-800 characters, natural SEO-rich paragraph. NO hashtags.
+7. **Keywords:** 5-8 high-intent phrases (no single words).
+8. **Board:** Choose from: Azulejo Dreams, Porto Collection, Lisbon Art, Portugal Gift Ideas, Portuguese Icons, Galo de Barcelos, Ocean Life, Minimalist Portugal, Douro Valley, Wine Collection.
+9. **Crop:** Relative values (0-1).
+
+JSON Schema:
 {
   "pinterest_title": string,
   "pinterest_description": string,
   "keywords": string[],
   "board": string,
-  "crop": {
-    "x": number,
-    "y": number,
-    "width": number,
-    "height": number
-  }
+  "crop": { "x": number, "y": number, "width": number, "height": number }
 }
-
-Rules:
-1. Title: 60-90 characters, SEO optimized, must include Portugal-related keywords.
-2. Description: 500-800 characters, natural SEO-rich paragraph. Focus on storytelling and intent. NO hashtags.
-3. Keywords: 5-8 high-intent keyword phrases (e.g., "Lisbon home decor", "Portuguese azulejo gifts").
-4. Board: Choose exactly one from: Azulejo Dreams, Porto Collection, Lisbon Art, Portugal Gift Ideas, Portuguese Icons, Galo de Barcelos, Ocean Life, Minimalist Portugal, Douro Valley, Wine Collection.
-5. Crop: Return RELATIVE values (0-1). Focus on the vertical object.
 `;
 
 // ================= UTILS =================
@@ -97,7 +95,7 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
         {
           role: "user",
           content: [
-            { type: "text", text: "Analyze this image for Pinterest SEO." },
+            { type: "text", text: "Analyze this image for high-intent Pinterest SEO." },
             {
               type: "image_url",
               image_url: { url: `data:image/jpeg;base64,${base64Image}` },
