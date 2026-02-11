@@ -19,6 +19,7 @@ cloudinary.config({
 });
 
 const app = express();
+app.set("trust proxy", 1); // 🔥 ОБЯЗАТЕЛЬНО для Render + rate-limit
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const PORT = process.env.PORT || 8787;
@@ -273,3 +274,4 @@ app.post("/api/pinterest/refresh", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 VivaPortugal AI v4.0 running on port ${PORT}`);
 });
+
