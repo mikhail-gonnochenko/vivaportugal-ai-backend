@@ -19,7 +19,7 @@ cloudinary.config({
 });
 
 const app = express();
-app.set("trust proxy", 1); // обязательно для Render
+app.set("trust proxy", 1); // Обязательно для корректной работы rate-limit на Render
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
@@ -76,31 +76,17 @@ app.get("/api/health", (req, res) => {
   res.json({ ok: true, version: "v5-production" });
 });
 
-// =======================================================
-// ================= PINTEREST OAUTH =====================
-// =======================================================
+// ================= PINTEREST OAUTH =================
 
-/**
- * ГЕНЕРАЦИЯ ССЫЛКИ АВТОРИЗАЦИИ
- * Фронтенд просто переходит по этому адресу.
- */
 app.get("/api/pinterest/auth", (req, res) => {
   const CLIENT_ID = process.env.PINTEREST_APP_ID;
   const REDIRECT_URI = encodeURIComponent(process.env.PINTEREST_REDIRECT_URI);
   const scope = "pins:read,pins:write,boards:read,boards:write";
 
-  const authUrl =
-    `https://www.pinterest.com/oauth/?response_type=code` +
-    `&client_id=${CLIENT_ID}` +
-    `&redirect_uri=${REDIRECT_URI}` +
-    `&scope=${scope}`;
-
+  const authUrl = `https://www.pinterest.com/oauth/?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=${scope}`;
   res.redirect(authUrl);
 });
 
-/**
- * CALLBACK (ОБРАБОТКА КОДА ОТ PINTEREST)
- */
 app.get("/api/pinterest/callback", async (req, res) => {
   try {
     const { code } = req.query;
@@ -129,23 +115,18 @@ app.get("/api/pinterest/callback", async (req, res) => {
 
     const { access_token, refresh_token } = response.data;
 
-    // Редирект обратно на фронтенд с токенами в URL
     res.redirect(
       `${process.env.FRONTEND_URL}?access=${access_token}&refresh=${refresh_token}`
     );
-
   } catch (err) {
     console.error("❌ OAuth error:", err.response?.data || err.message);
     res.status(500).json({ error: "OAuth failed" });
   }
 });
 
-// ================= REFRESH TOKEN =================
-
 app.post("/api/pinterest/refresh", async (req, res) => {
   try {
     const { refresh_token } = req.body;
-
     if (!refresh_token) {
       return res.status(400).json({ error: "Missing refresh token" });
     }
@@ -172,16 +153,13 @@ app.post("/api/pinterest/refresh", async (req, res) => {
       ok: true,
       access_token: response.data.access_token
     });
-
   } catch (err) {
     console.error("❌ Refresh error:", err.response?.data || err.message);
     res.status(500).json({ error: "Refresh failed" });
   }
 });
 
-// =======================================================
-// ================= AI ANALYZE ==========================
-// =======================================================
+// ================= AI ANALYZE =================
 
 app.post("/api/analyze", upload.single("image"), async (req, res) => {
   try {
@@ -197,14 +175,7 @@ app.post("/api/analyze", upload.single("image"), async (req, res) => {
       messages: [
         {
           role: "system",
-          content: `
-You are a Pinterest SEO expert.
-Return JSON with:
-pinterest_title, pinterest_description, keywords, board, crop.
-Title must start with primary keyword.
-Commercial buyer intent.
-Boards allowed: ${ALLOWED_BOARDS.join(", ")}
-`
+          content: `You are a Pinterest SEO expert. Return JSON with: pinterest_title, pinterest_description, keywords, board, crop. Title must start with primary keyword. Commercial buyer intent. Boards allowed: ${ALLOWED_BOARDS.join(", ")}`
         },
         {
           role: "user",
@@ -217,24 +188,17 @@ Boards allowed: ${ALLOWED_BOARDS.join(", ")}
     });
 
     let data = JSON.parse(response.choices[0].message.content);
-
-    if (!ALLOWED_BOARDS.includes(data.board))
-      data.board = ALLOWED_BOARDS[0];
-
-    if (!data.crop || typeof data.crop.x !== "number")
-      data.crop = FALLBACK_CROP;
+    if (!ALLOWED_BOARDS.includes(data.board)) data.board = ALLOWED_BOARDS[0];
+    if (!data.crop || typeof data.crop.x !== "number") data.crop = FALLBACK_CROP;
 
     res.json(data);
-
   } catch (err) {
     console.error("❌ AI Error:", err.message);
     res.status(500).json({ error: "AI failed" });
   }
 });
 
-// =======================================================
-// ================= CLOUDINARY UPLOAD ===================
-// =======================================================
+// ================= CLOUDINARY UPLOAD =================
 
 app.post("/api/upload", upload.single("image"), async (req, res) => {
   try {
@@ -266,7 +230,6 @@ app.post("/api/upload", upload.single("image"), async (req, res) => {
       },
       (err, result) => {
         if (err) return res.status(500).json({ error: "Upload failed" });
-
         res.json({
           ok: true,
           image: {
@@ -276,51 +239,38 @@ app.post("/api/upload", upload.single("image"), async (req, res) => {
         });
       }
     );
-
     stream.end(req.file.buffer);
-
-  } catch {
+  } catch (err) {
     res.status(500).json({ error: "Upload error" });
   }
 });
 
-// =======================================================
-// ================= BOARDS ==============================
-// =======================================================
+// ================= BOARDS =================
 
 app.get("/api/pinterest/boards", async (req, res) => {
   try {
     const token = req.headers.authorization;
-    if (!token)
-      return res.status(401).json({ error: "Missing token" });
+    if (!token) return res.status(401).json({ error: "Missing token" });
 
     const response = await axios.get(
       "https://api.pinterest.com/v5/boards",
       { headers: { Authorization: token } }
     );
 
-    const boards = response.data.items.map(b => ({
-      id: b.id,
-      name: b.name
-    }));
-
+    const boards = response.data.items.map(b => ({ id: b.id, name: b.name }));
     res.json({ ok: true, boards });
-
   } catch (err) {
     console.error("❌ Boards error:", err.response?.data || err.message);
     res.status(500).json({ error: "Boards fetch failed" });
   }
 });
 
-// =======================================================
-// ================= CREATE PIN ==========================
-// =======================================================
+// ================= CREATE PIN =================
 
 app.post("/api/pinterest/pins", async (req, res) => {
   try {
     const token = req.headers.authorization;
-    if (!token)
-      return res.status(401).json({ error: "Missing token" });
+    if (!token) return res.status(401).json({ error: "Missing token" });
 
     const { title, description, image_url, board_id, link } = req.body;
 
@@ -340,13 +290,9 @@ app.post("/api/pinterest/pins", async (req, res) => {
     );
 
     res.json({ ok: true, id: response.data.id });
-
   } catch (err) {
     console.error("❌ Pin error:", err.response?.data || err.message);
-    res.status(500).json({
-      error: "Pin failed",
-      details: err.response?.data
-    });
+    res.status(500).json({ error: "Pin failed", details: err.response?.data });
   }
 });
 
@@ -354,4 +300,4 @@ app.post("/api/pinterest/pins", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 VivaPortugal AI v5 running on port ${PORT}`);
-}); /
+});
