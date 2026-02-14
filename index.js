@@ -354,3 +354,4 @@ app.post("/api/pinterest/pins", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 VivaPortugal AI v5 running on port ${PORT}`);
+}); /
