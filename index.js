@@ -81,18 +81,26 @@ app.get("/api/health", (req, res) => {
 // =======================================================
 
 /**
- * Исправление №1: Генерация ссылки авторизации на бэкенде
- * Теперь фронтенд просто переходит по этой ссылке.
+ * ГЕНЕРАЦИЯ ССЫЛКИ АВТОРИЗАЦИИ
+ * Фронтенд просто переходит по этому адресу.
  */
 app.get("/api/pinterest/auth", (req, res) => {
   const CLIENT_ID = process.env.PINTEREST_APP_ID;
   const REDIRECT_URI = encodeURIComponent(process.env.PINTEREST_REDIRECT_URI);
   const scope = "pins:read,pins:write,boards:read,boards:write";
-  
-  const authUrl = `https://www.pinterest.com/oauth/?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=${scope}`;
+
+  const authUrl =
+    `https://www.pinterest.com/oauth/?response_type=code` +
+    `&client_id=${CLIENT_ID}` +
+    `&redirect_uri=${REDIRECT_URI}` +
+    `&scope=${scope}`;
+
   res.redirect(authUrl);
 });
 
+/**
+ * CALLBACK (ОБРАБОТКА КОДА ОТ PINTEREST)
+ */
 app.get("/api/pinterest/callback", async (req, res) => {
   try {
     const { code } = req.query;
@@ -121,7 +129,7 @@ app.get("/api/pinterest/callback", async (req, res) => {
 
     const { access_token, refresh_token } = response.data;
 
-    // 🔥 Редирект обратно на фронтенд
+    // Редирект обратно на фронтенд с токенами в URL
     res.redirect(
       `${process.env.FRONTEND_URL}?access=${access_token}&refresh=${refresh_token}`
     );
@@ -346,4 +354,3 @@ app.post("/api/pinterest/pins", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 VivaPortugal AI v5 running on port ${PORT}`);
-});
