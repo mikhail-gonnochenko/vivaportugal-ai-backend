@@ -80,6 +80,19 @@ app.get("/api/health", (req, res) => {
 // ================= PINTEREST OAUTH =====================
 // =======================================================
 
+/**
+ * Исправление №1: Генерация ссылки авторизации на бэкенде
+ * Теперь фронтенд просто переходит по этой ссылке.
+ */
+app.get("/api/pinterest/auth", (req, res) => {
+  const CLIENT_ID = process.env.PINTEREST_APP_ID;
+  const REDIRECT_URI = encodeURIComponent(process.env.PINTEREST_REDIRECT_URI);
+  const scope = "pins:read,pins:write,boards:read,boards:write";
+  
+  const authUrl = `https://www.pinterest.com/oauth/?response_type=code&client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=${scope}`;
+  res.redirect(authUrl);
+});
+
 app.get("/api/pinterest/callback", async (req, res) => {
   try {
     const { code } = req.query;
