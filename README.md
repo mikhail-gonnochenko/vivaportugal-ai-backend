@@ -103,7 +103,7 @@ Output format:
 
 Optimized for Pinterest specifications
 
-Demo (MVP)
+Demo (MVP) ![VivaPortugal AI Demo](./assets/vivaportugal-ai-demo.png)
 
 The system is fully functional as an MVP.
 
